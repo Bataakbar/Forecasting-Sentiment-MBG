@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sentimen MBG — Makan Bergizi Gratis Forecasting Dashboard</title>
+  
+  <!-- Google Fonts: DM Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
+  
+  <!-- Tabler Icons CSS via CDN -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  
+  <!-- Pustaka CSS Kustom -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}?v={{ range(1, 100000) | random }}">
+</head>
+<body>
+
+  <h2 class="sr-only" style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0;">Dashboard Forecasting Sentimen Masyarakat terhadap Program MBG (Makan Bergizi Gratis)</h2>
+
+  <div class="dash">
+    <!-- Error Banner -->
+    <div id="errorBanner" style="display:none; background:#FCEBEB; color:#A32D2D; padding:12px 16px; border-radius:8px; margin-bottom:15px; font-size:13px; border:1px solid rgba(163,45,45,0.2); font-weight: 500; align-items: center; gap: 8px;">
+      <i class="ti ti-alert-triangle" style="font-size:16px;"></i> <span id="errorBannerText"></span>
+    </div>
+
+    <!-- Header -->
+    <div class="header">
+      <div class="header-top">
+        <div class="logo-area">
+          <div class="logo-badge"><i class="ti ti-salad" aria-hidden="true"></i></div>
+          <div>
+            <h1>Sentimen MBG — Makan Bergizi Gratis</h1>
+            <div class="header-sub">Dashboard Forecasting Sentimen Masyarakat · Model CNN-LSTM Positif & Negatif</div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span class="badge-live"><span class="dot-live"></span> Live Update</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Metrik Utama (KPI) -->
+    <div class="metrics" id="metricsContainer">
+      <div class="metric-card">
+        <div class="metric-label">Total Mention</div>
+        <div class="metric-val" id="totalMention">-</div>
+        <div class="metric-change neutral"><i class="ti ti-database"></i> Dari dataset labeled_data</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Sentimen Positif</div>
+        <div class="metric-val" id="latestPos" style="color:var(--color-positive);">-</div>
+        <div class="metric-change" id="posChangeContainer">
+          <i class="ti ti-trending-up" id="posChangeIcon"></i> <span id="posChangeText">-</span> vs sebelumnya
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Sentimen Negatif</div>
+        <div class="metric-val" id="latestNeg" style="color:var(--color-negative);">-</div>
+        <div class="metric-change" id="negChangeContainer">
+          <i class="ti ti-trending-down" id="negChangeIcon"></i> <span id="negChangeText">-</span> vs sebelumnya
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Netral</div>
+        <div class="metric-val" id="latestNeu" style="color:var(--color-text-secondary);">-</div>
+        <div class="metric-change neutral"><i class="ti ti-minus"></i> Cukup stabil</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Akurasi Model</div>
+        <div class="metric-val" id="modelAccuracy" style="color:var(--color-info);">-</div>
+        <div class="metric-change up" style="color:var(--color-info);"><i class="ti ti-cpu"></i> F1-Score: <span id="f1Score">-</span></div>
+      </div>
+    </div>
+
+    <!-- Grafik Tren Positif -->
+    <div class="card-full">
+      <div class="chart-controls">
+        <div class="card-title" style="margin-bottom:0; padding-bottom:0; border-bottom:none;">
+          <i class="ti ti-chart-line" aria-hidden="true"></i> <span id="trendChartPosTitle">Tren Sentimen Positif Harian</span>
+        </div>
+        <div class="toggle-group">
+          <button class="toggle-btn active" id="btnRaw" onclick="setChartMode('raw')">Data Harian</button>
+          <button class="toggle-btn" id="btnSmooth" onclick="setChartMode('smooth')">Rata-rata Bergerak (7 Hari)</button>
+        </div>
+      </div>
+      
+      <div class="legend">
+        <span class="legend-item"><span class="legend-dot" style="background:var(--color-positive);"></span> Positif (Aktual)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:#185FA5;border:2px dashed #185FA5;background:transparent;width:16px;height:0;border-radius:0;border-top:2px dashed #185FA5;"></span> Forecast Positif (CNN-LSTM)</span>
+      </div>
+      
+      <div style="position:relative; width:100%; height:200px;">
+        <canvas id="trendChartPos" role="img" aria-label="Grafik tren sentimen positif masyarakat">Memuat data tren positif...</canvas>
+      </div>
+    </div>
+
+    <!-- Grafik Tren Negatif -->
+    <div class="card-full">
+      <div class="chart-controls">
+        <div class="card-title" style="margin-bottom:0; padding-bottom:0; border-bottom:none;">
+          <i class="ti ti-chart-line" aria-hidden="true"></i> <span id="trendChartNegTitle">Tren Sentimen Negatif Harian</span>
+        </div>
+      </div>
+      
+      <div class="legend">
+        <span class="legend-item"><span class="legend-dot" style="background:var(--color-negative);"></span> Negatif (Aktual)</span>
+        <span class="legend-item"><span class="legend-dot" style="background:#E24B4A;border:2px dashed #E24B4A;background:transparent;width:16px;height:0;border-radius:0;border-top:2px dashed #E24B4A;"></span> Forecast Negatif (CNN-LSTM)</span>
+      </div>
+      
+      <div style="position:relative; width:100%; height:200px;">
+        <canvas id="trendChartNeg" role="img" aria-label="Grafik tren sentimen negatif masyarakat">Memuat data tren negatif...</canvas>
+      </div>
+      
+      <div class="info-box" style="margin-top: 15px;">
+        <i class="ti ti-info-circle" aria-hidden="true"></i>
+        <span id="forecastInfoText">Proyeksi dihitung secara autoregresif menggunakan data historis 14 hari terakhir melalui model CNN-LSTM terpisah untuk tren positif dan negatif.</span>
+      </div>
+    </div>
+
+    <!-- Grid Tengah: Donat Chart & Topik Dominan -->
+    <div class="grid2">
+      <div class="card">
+        <div class="card-title"><i class="ti ti-chart-donut" aria-hidden="true"></i> Distribusi Sentimen Terbaru</div>
+        <div style="position:relative; width:100%; height:180px;">
+          <canvas id="donutChart" role="img" aria-label="Donut chart distribusi sentimen terbaru">Memuat chart distribusi...</canvas>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><i class="ti ti-messages" aria-hidden="true"></i> Kata Kunci Paling Banyak Dibahas</div>
+        <div class="topic-list" id="topicListContainer">
+          <p style="font-size:12px; color:var(--color-text-secondary); text-align:center; padding: 20px 0;">Mengekstrak topik dari dataset...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Grid Bawah: Deskripsi Model & Tabel Forecast Harian -->
+    <div class="grid2">
+      <div class="card">
+        <div class="card-title"><i class="ti ti-cpu" aria-hidden="true"></i> Model Forecasting Yang Digunakan</div>
+        <div class="model-card">
+          <div class="model-icon" style="background:var(--color-positive-bg);"><i class="ti ti-mood-happy" style="color:var(--color-positive); font-size:20px;" aria-hidden="true"></i></div>
+          <div>
+            <div class="model-title">Model Sentimen Positif (CNN-LSTM)</div>
+            <div class="model-desc">Memprediksi tren kenaikan apresiasi dan ekspektasi positif masyarakat dengan menganalisis deret waktu 14 hari sebelumnya.</div>
+            <div class="model-score" style="color:var(--color-positive);"><i class="ti ti-check"></i> MAE: 16.2% · Input: (14, 1)</div>
+          </div>
+        </div>
+        <div class="model-card">
+          <div class="model-icon" style="background:var(--color-negative-bg);"><i class="ti ti-mood-sad" style="color:var(--color-negative); font-size:20px;" aria-hidden="true"></i></div>
+          <div>
+            <div class="model-title">Model Sentimen Negatif (CNN-LSTM)</div>
+            <div class="model-desc">Mendeteksi potensi peningkatan keluhan atau kekhawatiran publik terkait anggaran, logistik, atau kualitas menu MBG.</div>
+            <div class="model-score" style="color:var(--color-negative);"><i class="ti ti-check"></i> MAE: 38.3% · Input: (14, 1)</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><i class="ti ti-calendar-stats" aria-hidden="true"></i> <span id="forecastTableTitle">Forecast Harian</span></div>
+        <div style="max-height: 250px; overflow-y: auto;">
+          <table class="forecast-table">
+            <thead>
+              <tr>
+                <th>Tanggal</th>
+                <th>Positif</th>
+                <th>Negatif</th>
+                <th>Tren</th>
+              </tr>
+            </thead>
+            <tbody id="forecastTableBody">
+              <tr>
+                <td colspan="4" style="text-align:center; padding: 20px 0; color:var(--color-text-secondary);">Menghitung proyeksi model...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Feed Komentar Terbaru & Simulasi Interaktif -->
+    <div class="grid2">
+      <div class="card">
+        <div class="card-title"><i class="ti ti-message-circle" aria-hidden="true"></i> Komentar / Postingan Terbaru</div>
+        <div class="comment-feed" id="commentFeedContainer">
+          <p style="font-size:12px; color:var(--color-text-secondary); text-align:center; padding: 20px 0;">Memuat feed komentar...</p>
+        </div>
+      </div>
+      
+      <div class="card">
+        <div class="card-title"><i class="ti ti-flask" aria-hidden="true"></i> Panel Simulasi Prediksi Kustom</div>
+        <div class="sim-form-container">
+          <p style="font-size: 11px; color: var(--color-text-secondary); line-height: 1.4; margin-bottom: 5px;">
+            Modifikasi nilai persentase sentimen positif/negatif untuk 14 hari terakhir di bawah ini, lalu klik tombol untuk menguji respon prediksi model CNN-LSTM untuk hari berikutnya secara langsung.
+          </p>
+          
+          <form id="simulatorForm" onsubmit="runCustomForecast(event)">
+            <div class="sim-input-grid" id="simulatorInputGrid">
+              <!-- Inputs generated dynamically by JS -->
+            </div>
+            
+            <div class="sim-actions">
+              <div style="display:flex; gap:8px;">
+                <button type="button" class="btn btn-secondary" onclick="loadDefaultSimulatorData()">Muat Data Riil</button>
+                <button type="submit" class="btn btn-primary">Prediksi Hari Ke-15</button>
+              </div>
+              
+              <div class="sim-result-box" id="simulatorResult" style="display: none;">
+                <div class="sim-result-item">
+                  <span class="sim-result-lbl">Forecast Positif</span>
+                  <span class="sim-result-val" id="simResultPos" style="color:var(--color-positive);">-</span>
+                </div>
+                <div class="sim-result-item">
+                  <span class="sim-result-lbl">Forecast Negatif</span>
+                  <span class="sim-result-val" id="simResultNeg" style="color:var(--color-negative);">-</span>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <p><i class="ti ti-database" aria-hidden="true"></i> Sumber data: Twitter/X, Instagram, TikTok, Berita Online · Rentang Data: Mei 2026</p>
+      <p><i class="ti ti-shield-check" aria-hidden="true"></i> Model NLP CNN-LSTM & LSTM Time Series · Confidence Interval 95%</p>
+    </div>
+  </div>
+
+  <!-- Chart.js via CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  
+  <!-- Pustaka Javascript Kustom -->
+  <script src="{{ url_for('static', filename='js/app.js') }}?v={{ range(1, 100000) | random }}"></script>
+</body>
+</html>
