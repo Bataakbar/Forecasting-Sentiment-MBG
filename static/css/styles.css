@@ -684,3 +684,33 @@ body {
   font-size: 13px;
   color: var(--color-primary);
 }
+
+/* Dataset Upload Panel Custom Styling */
+.dataset-panel {
+  border-left: 4px solid var(--color-primary) !important;
+}
+
+.dataset-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 10px;
+}
+
+.file-name-label {
+  font-weight: 500;
+  transition: var(--transition);
+}
+
+.badge-default-active {
+  background: var(--color-primary-light) !important;
+  color: var(--color-primary) !important;
+  border: 1px solid rgba(26, 92, 56, 0.2);
+}
+
+.badge-custom-active {
+  background: var(--color-info-bg) !important;
+  color: var(--color-info) !important;
+  border: 1px solid rgba(24, 95, 165, 0.2);
+}

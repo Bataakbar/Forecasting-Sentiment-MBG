@@ -1,5 +1,6 @@
 import os
 import re
+import json
 from collections import Counter
 import pandas as pd
 import numpy as np
@@ -8,11 +9,31 @@ from flask import Flask, jsonify, render_template, request
 
 app = Flask(__name__)
 
-# Tentukan path model
+# Tentukan path model dan data
 MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_POS_PATH = os.path.join(MODEL_DIR, 'model_cnn_lstm_positif.h5')
 MODEL_NEG_PATH = os.path.join(MODEL_DIR, 'model_cnn_lstm_negatif.h5')
-DATASET_PATH = os.path.join(MODEL_DIR, 'labeled_data.csv')
+DEFAULT_DATASET_PATH = os.path.join(MODEL_DIR, 'labeled_data.csv')
+CUSTOM_DATASET_PATH = os.path.join(MODEL_DIR, 'labeled_data_custom.csv')
+CUSTOM_METADATA_PATH = os.path.join(MODEL_DIR, 'custom_metadata.json')
+
+def get_active_dataset_path():
+    if os.path.exists(CUSTOM_DATASET_PATH):
+        return CUSTOM_DATASET_PATH
+    return DEFAULT_DATASET_PATH
+
+def get_dataset_info():
+    if os.path.exists(CUSTOM_DATASET_PATH):
+        original_name = 'labeled_data_custom.csv'
+        if os.path.exists(CUSTOM_METADATA_PATH):
+            try:
+                with open(CUSTOM_METADATA_PATH, 'r') as f:
+                    meta = json.load(f)
+                    original_name = meta.get('original_name', 'labeled_data_custom.csv')
+            except Exception:
+                pass
+        return {'type': 'custom', 'filename': original_name}
+    return {'type': 'default', 'filename': 'labeled_data.csv'}
 
 # Variabel global untuk model
 model_pos = None
@@ -34,13 +55,36 @@ load_models()
 
 def get_processed_data():
     """
-    Membaca labeled_data.csv, melakukan agregasi harian,
+    Membaca dataset aktif (default atau custom), melakukan agregasi harian,
     dan menghitung persentase sentimen.
     """
-    if not os.path.exists(DATASET_PATH):
-        raise FileNotFoundError(f"Dataset tidak ditemukan di: {DATASET_PATH}")
+    path = get_active_dataset_path()
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Dataset tidak ditemukan di: {path}")
         
-    df = pd.read_csv(DATASET_PATH)
+    df = pd.read_csv(path)
+    
+    # Pemetaan kolom kustom (skema baru: text, createTimeISO, sentiment)
+    if 'createTimeISO' in df.columns:
+        df['date'] = df['createTimeISO']
+    
+    if 'platform' not in df.columns:
+        df['platform'] = 'Media Sosial'
+        
+    if 'final_text' not in df.columns and 'text' in df.columns:
+        df['final_text'] = df['text']
+        
+    # Pastikan kolom date ada
+    if 'date' not in df.columns:
+        raise ValueError("Kolom tanggal ('date' atau 'createTimeISO') wajib ada dalam CSV.")
+        
+    # Pastikan kolom text ada
+    if 'text' not in df.columns:
+        raise ValueError("Kolom 'text' wajib ada dalam CSV.")
+        
+    # SELALU gunakan klasifikasi leksikon kita untuk menentukan sentimen
+    df['sentiment'] = df['text'].apply(analyze_sentiment)
+    
     df['date'] = pd.to_datetime(df['date'], errors='coerce')
     df = df.dropna(subset=['date'])
     df['date_only'] = df['date'].dt.date
@@ -55,6 +99,9 @@ def get_processed_data():
             
     daily = daily.sort_values('date_only').reset_index(drop=True)
     daily['Total'] = daily['Positif'] + daily['Negatif'] + daily['Netral']
+    
+    # Cegah pembagian dengan nol
+    daily['Total'] = daily['Total'].replace(0, 1)
     
     # Hitung persentase sentimen (skala 0 - 1)
     daily['Pos_Pct'] = daily['Positif'] / daily['Total']
@@ -139,7 +186,7 @@ def api_dashboard():
         pos_history = list(daily['Pos_Pct'].tail(14).values)
         neg_history = list(daily['Neg_Pct'].tail(14).values)
 
-        forecast_steps = len(daily) # 107 Hari
+        forecast_steps = 30  # Tepat 30 Hari Ke Depan
         forecast_pos = []
         forecast_neg = []
         
@@ -189,11 +236,19 @@ def api_dashboard():
             forecast_dates_display.append(forecast_date.strftime('%d %b'))
 
         # Hitung tren perubahan dibanding hari sebelumnya
-        pos_change_up = latest_day['Pos_Pct'] > daily['Pos_Pct'].iloc[-2]
-        pos_change_str = "+2.4%" if pos_change_up else "-1.5%"
-        
-        neg_change_up = latest_day['Neg_Pct'] > daily['Neg_Pct'].iloc[-2]
-        neg_change_str = "-1.2%" if not neg_change_up else "+0.8%"
+        if len(daily) > 1:
+            pos_change_up = latest_day['Pos_Pct'] > daily['Pos_Pct'].iloc[-2]
+            pos_change_diff = abs(latest_day['Pos_Pct'] - daily['Pos_Pct'].iloc[-2]) * 100
+            pos_change_str = f"{'+' if pos_change_up else '-'}{pos_change_diff:.1f}%"
+            
+            neg_change_up = latest_day['Neg_Pct'] > daily['Neg_Pct'].iloc[-2]
+            neg_change_diff = abs(latest_day['Neg_Pct'] - daily['Neg_Pct'].iloc[-2]) * 100
+            neg_change_str = f"{'+' if neg_change_up else '-'}{neg_change_diff:.1f}%"
+        else:
+            pos_change_up = True
+            pos_change_str = "0.0%"
+            neg_change_up = False
+            neg_change_str = "0.0%"
 
         # Format historical
         hist_dates = [d.strftime('%d %b') for d in daily['date_only']]
@@ -217,6 +272,7 @@ def api_dashboard():
         topics = get_top_topics(df, limit=5)
         
         return jsonify({
+            'dataset_info': get_dataset_info(),
             'history': {
                 'dates_display': hist_dates,
                 'pos_raw': [float(x * 100) for x in daily['Pos_Pct']],
@@ -298,6 +354,145 @@ def api_custom_forecast():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# Lexicon-based Indonesian sentiment analysis for MBG comments
+INDONESIAN_POSITIVE_WORDS = {
+    'enak', 'mantap', 'mntp', 'bagus', 'bgs', 'setuju', 'senang', 'suka', 'bergizi', 'sehat', 
+    'bantu', 'membantu', 'terima kasih', 'makasih', 'mksih', 'alhamdulillah', 'mantul', 
+    'lezat', 'apresiasi', 'hebat', 'dukung', 'mendukung', 'top', 'keren', 'manfaat', 
+    'bermanfaat', 'lancar', 'bersyukur', 'bersukur', 'untung', 'hebat', 'setuju', 
+    'sip', 'oke', 'ok', 'good', 'nice', 'lajut', 'lanjut', 'lanjutkan', 'terimakasih'
+}
+
+INDONESIAN_NEGATIVE_WORDS = {
+    'gagal', 'jelek', 'buruk', 'kecewa', 'rugi', 'merugikan', 'basi', 'monoton', 'lambat', 
+    'terhambat', 'mahal', 'biaya', 'anggaran', 'korupsi', 'sepi', 'tolak', 'menolak', 
+    'tidak setuju', 'gak setuju', 'susah', 'sulit', 'protes', 'sedikit', 'kurang', 
+    'amburadul', 'keterlaluan', 'kecewa', 'bohong', 'hoax', 'rugi', 'sayang', 'sayangnya', 
+    'potong', 'dipotong', 'korup', 'hambat', 'lambat', 'henti', 'hentikan', 'stop',
+    'hancur', 'hancoor', 'ancur', 'ancoor', 'ancooor', 'morat', 'marit', 'miskin', 'melarat', 'habis', 'utang', 'hutang'
+}
+
+def analyze_sentiment(text):
+    if not isinstance(text, str):
+        return 'Netral'
+    text_lower = text.lower()
+    
+    # Tokenize sederhana menggunakan regex
+    words = re.findall(r'\b\w+\b', text_lower)
+    
+    pos_score = sum(1 for w in words if w in INDONESIAN_POSITIVE_WORDS)
+    neg_score = sum(1 for w in words if w in INDONESIAN_NEGATIVE_WORDS)
+    
+    # Tambahan pengecekan frasa khusus
+    if 'tidak setuju' in text_lower or 'ga setuju' in text_lower or 'gak setuju' in text_lower:
+        neg_score += 1.5
+    if 'terima kasih' in text_lower or 'terimakasih' in text_lower:
+        pos_score += 1.5
+    if 'gagal total' in text_lower:
+        neg_score += 1.5
+        
+    if pos_score > neg_score:
+        return 'Positif'
+    elif neg_score > pos_score:
+        return 'Negatif'
+    else:
+        return 'Netral'
+
+
+@app.route('/api/upload-dataset', methods=['POST'])
+def api_upload_dataset():
+    try:
+        # Periksa apakah ada file dalam request
+        if 'file' not in request.files:
+            # "ketika input tidak diisi maka tetap dataset yang lama"
+            return jsonify({
+                'success': True,
+                'message': 'Tidak ada file baru yang diunggah. Tetap menggunakan dataset sebelumnya.',
+                'dataset_info': get_dataset_info()
+            })
+            
+        file = request.files['file']
+        
+        # Jika nama file kosong (misal submit form kosong)
+        if file.filename == '':
+            return jsonify({
+                'success': True,
+                'message': 'Tidak ada file baru yang dipilih. Tetap menggunakan dataset sebelumnya.',
+                'dataset_info': get_dataset_info()
+            })
+            
+        if not file.filename.endswith('.csv'):
+            return jsonify({'error': 'File harus berformat CSV (.csv)'}), 400
+            
+        # Simpan sementara untuk validasi
+        temp_path = CUSTOM_DATASET_PATH + '.tmp'
+        file.save(temp_path)
+        
+        try:
+            df = pd.read_csv(temp_path)
+            uploaded_cols = set(df.columns)
+            
+            # Periksa apakah ada kolom teks (text) dan tanggal (createTimeISO atau date)
+            has_text = 'text' in uploaded_cols
+            has_date = 'createTimeISO' in uploaded_cols or 'date' in uploaded_cols
+            
+            if not (has_text and has_date):
+                os.remove(temp_path)
+                return jsonify({
+                    'error': 'Skema CSV tidak valid. CSV wajib memiliki kolom teks [text] dan kolom tanggal [createTimeISO atau date].'
+                }), 400
+                
+            # Jika kolom sentiment tidak ada, lakukan analisis sentimen otomatis
+            if 'sentiment' not in uploaded_cols:
+                print("--> Mendeteksi kolom 'sentiment' tidak ada. Melakukan klasifikasi sentimen otomatis...")
+                df['sentiment'] = df['text'].apply(analyze_sentiment)
+                # Simpan ulang ke temp_path agar CSV yang tersimpan memiliki kolom sentiment
+                df.to_csv(temp_path, index=False)
+                
+            # Validasi tipe data atau minimal baris jika perlu
+            if len(df) == 0:
+                os.remove(temp_path)
+                return jsonify({'error': 'File CSV tidak boleh kosong.'}), 400
+                
+            # Ganti file kustom lama dengan file baru
+            if os.path.exists(CUSTOM_DATASET_PATH):
+                os.remove(CUSTOM_DATASET_PATH)
+            os.rename(temp_path, CUSTOM_DATASET_PATH)
+            
+            # Simpan metadata file asli
+            with open(CUSTOM_METADATA_PATH, 'w') as f:
+                json.dump({'original_name': file.filename}, f)
+                
+            return jsonify({
+                'success': True,
+                'message': f'Dataset kustom "{file.filename}" berhasil diunggah dan diterapkan.',
+                'dataset_info': get_dataset_info()
+            })
+            
+        except Exception as e:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            return jsonify({'error': f'Gagal membaca/memvalidasi file CSV: {str(e)}'}), 400
+            
+    except Exception as e:
+        return jsonify({'error': f'Terjadi kesalahan server: {str(e)}'}), 500
+
+
+@app.route('/api/reset-dataset', methods=['POST'])
+def api_reset_dataset():
+    try:
+        if os.path.exists(CUSTOM_DATASET_PATH):
+            os.remove(CUSTOM_DATASET_PATH)
+        if os.path.exists(CUSTOM_METADATA_PATH):
+            os.remove(CUSTOM_METADATA_PATH)
+        return jsonify({
+            'success': True,
+            'message': 'Dataset telah dikembalikan ke bawaan (labeled_data.csv).',
+            'dataset_info': get_dataset_info()
+        })
+    except Exception as e:
+        return jsonify({'error': f'Gagal mereset dataset: {str(e)}'}), 500
 
 if __name__ == '__main__':
     # Jika dipanggil dengan flag --test-models, uji pemuatan dan keluar

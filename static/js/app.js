@@ -19,8 +19,8 @@ async function fetchDashboardData() {
     dashboardData = await response.json();
     
     // Update teks judul & deskripsi secara dinamis berdasarkan panjang data
-    document.getElementById('trendChartPosTitle').innerText = `Tren & Forecast Sentimen Positif (${dashboardData.history.dates_display.length} Hari Terakhir + Forecast ${dashboardData.forecast.pos.length} Hari)`;
-    document.getElementById('trendChartNegTitle').innerText = `Tren & Forecast Sentimen Negatif (${dashboardData.history.dates_display.length} Hari Terakhir + Forecast ${dashboardData.forecast.neg.length} Hari)`;
+    document.getElementById('trendChartPosTitle').innerText = `Tren & Forecast Sentimen Positif`;
+    document.getElementById('trendChartNegTitle').innerText = `Tren & Forecast Sentimen Negatif`;
     document.getElementById('forecastInfoText').innerText = `Proyeksi ${dashboardData.forecast.pos.length} hari ke depan dihitung secara autoregresif menggunakan data historis 14 hari terakhir melalui model CNN-LSTM terpisah untuk tren positif dan negatif.`;
     document.getElementById('forecastTableTitle').innerText = `Forecast Harian (${dashboardData.forecast.pos.length} Hari Ke Depan)`;
     
@@ -32,7 +32,7 @@ async function fetchDashboardData() {
     renderForecastTable(dashboardData.forecast, dashboardData.history);
     renderComments(dashboardData.recent_comments);
     initSimulatorInputs(dashboardData.history);
-    
+    updateDatasetStatus(dashboardData.dataset_info);
   } catch (error) {
     console.error('Error:', error);
     const banner = document.getElementById('errorBanner');
@@ -451,5 +451,120 @@ async function runCustomForecast(event) {
   } catch (error) {
     console.error('Error:', error);
     alert('Terjadi kesalahan simulasi: ' + error.message);
+  }
+}
+
+// 9. Fungsi Pengaturan & Upload Dataset Kustom
+function updateDatasetStatus(info) {
+  const badge = document.getElementById('datasetStatusBadge');
+  const btnReset = document.getElementById('btnResetDataset');
+  
+  if (!badge) return;
+  
+  if (info && info.type === 'custom') {
+    badge.innerText = `Kustom (${info.filename})`;
+    badge.className = 'pill badge-custom-active';
+    if (btnReset) btnReset.style.display = 'inline-flex';
+  } else {
+    badge.innerText = 'Default (labeled_data.csv)';
+    badge.className = 'pill badge-default-active';
+    if (btnReset) btnReset.style.display = 'none';
+  }
+}
+
+function handleFileSelection(input) {
+  const label = document.getElementById('fileNameLabel');
+  if (!label) return;
+  
+  if (input.files && input.files[0]) {
+    label.innerText = input.files[0].name;
+    label.style.fontStyle = 'normal';
+    label.style.color = 'var(--color-text-primary)';
+  } else {
+    label.innerText = 'Tidak ada file baru terpilih (tetap dataset lama)';
+    label.style.fontStyle = 'italic';
+    label.style.color = 'var(--color-text-secondary)';
+  }
+}
+
+async function uploadNewDataset(event) {
+  event.preventDefault();
+  
+  const fileInput = document.getElementById('datasetFileInput');
+  const label = document.getElementById('fileNameLabel');
+  
+  if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+    // "ketika input tidak diisi maka tetap dataset yang lama"
+    alert('Tidak ada file baru yang dipilih. Tetap menggunakan dataset yang sedang aktif.');
+    return;
+  }
+  
+  const file = fileInput.files[0];
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  // Tampilkan status loading pada tombol
+  const submitBtn = event.target.querySelector('button[type="submit"]');
+  const originalHtml = submitBtn.innerHTML;
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = '<i class="ti ti-loader animate-spin" style="animation: pulse 1s infinite;"></i> Memproses...';
+  
+  try {
+    const response = await fetch('/api/upload-dataset', {
+      method: 'POST',
+      body: formData
+    });
+    
+    const result = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(result.error || 'Gagal mengunggah dataset.');
+    }
+    
+    // Sembunyikan banner error jika sebelumnya aktif
+    const banner = document.getElementById('errorBanner');
+    if (banner) banner.style.display = 'none';
+    
+    alert(result.message);
+    
+    // Reset file input
+    fileInput.value = '';
+    if (label) {
+      label.innerText = 'Tidak ada file baru terpilih (tetap dataset lama)';
+      label.style.fontStyle = 'italic';
+      label.style.color = 'var(--color-text-secondary)';
+    }
+    
+    // Reload dashboard
+    await fetchDashboardData();
+    
+  } catch (error) {
+    console.error('Error uploading dataset:', error);
+    alert('Gagal memperbarui dataset: ' + error.message);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = originalHtml;
+  }
+}
+
+async function resetDataset() {
+  if (!confirm('Apakah Anda yakin ingin mengembalikan dataset ke bawaan (default)?')) return;
+  
+  try {
+    const response = await fetch('/api/reset-dataset', {
+      method: 'POST'
+    });
+    
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Gagal mereset dataset');
+    
+    alert(result.message);
+    
+    // Reload dashboard
+    await fetchDashboardData();
+    
+  } catch (error) {
+    console.error('Error resetting dataset:', error);
+    alert('Gagal mereset dataset: ' + error.message);
   }
 }

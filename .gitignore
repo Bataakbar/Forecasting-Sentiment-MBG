@@ -9,4 +9,8 @@ ENV/
 .idea/
 .vscode/
 .DS_Store
-*.log
+
+# Local custom uploads
+labeled_data_custom.csv
+labeled_data_custom.csv.tmp
+custom_metadata.json
