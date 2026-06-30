@@ -466,7 +466,7 @@ function updateDatasetStatus(info) {
     badge.className = 'pill badge-custom-active';
     if (btnReset) btnReset.style.display = 'inline-flex';
   } else {
-    badge.innerText = 'Default (labeled_data.csv)';
+    badge.innerText = 'Default (dataset baru.csv)';
     badge.className = 'pill badge-default-active';
     if (btnReset) btnReset.style.display = 'none';
   }
@@ -481,7 +481,7 @@ function handleFileSelection(input) {
     label.style.fontStyle = 'normal';
     label.style.color = 'var(--color-text-primary)';
   } else {
-    label.innerText = 'Tidak ada file baru terpilih (tetap dataset lama)';
+    label.innerText = 'Tidak ada file baru terpilih (tetap dataset aktif)';
     label.style.fontStyle = 'italic';
     label.style.color = 'var(--color-text-secondary)';
   }
@@ -530,7 +530,7 @@ async function uploadNewDataset(event) {
     // Reset file input
     fileInput.value = '';
     if (label) {
-      label.innerText = 'Tidak ada file baru terpilih (tetap dataset lama)';
+      label.innerText = 'Tidak ada file baru terpilih (tetap dataset aktif)';
       label.style.fontStyle = 'italic';
       label.style.color = 'var(--color-text-secondary)';
     }
